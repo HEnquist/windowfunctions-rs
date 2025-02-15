@@ -1,0 +1,18 @@
+[package]
+name = "windowfunctions"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.71"
+authors = ["HEnquist <henrik.enquist@gmail.com>"]
+description = "Common window functions for apodization"
+license = "MIT"
+repository = "https://github.com/HEnquist/finestra"
+keywords = ["apodization", "windowing"]
+categories = ["mathematics", "science"]
+readme = "README.md"
+
+[dependencies]
+num-traits = "0.2"
+
+[dev-dependencies]
+approx = "0.5.1"
