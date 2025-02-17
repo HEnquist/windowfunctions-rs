@@ -1,42 +1,50 @@
-use num_traits::Float;
+#![doc = include_str!("../README.md")]
 
-/// Different window functions that can be used to window the sinc function.
+use num_traits::{Float, FloatConst};
+
+/// Enumeration of different window functions used to mitigate spectral leakage in signal processing.
 #[derive(Debug, Clone, Copy)]
 pub enum WindowFunction {
-    /// Blackman
+    /// Blackman window: A taper formed by using the first three terms of a summation of cosines. Good for low sidelobe level.
     Blackman,
-    /// Blackman-Harris
+    /// Blackman-Harris window: A generalization of the Blackman window, offering improved spectral leakage performance.
     BlackmanHarris,
-    /// Hamming
+    /// Hamming window: A raised cosine window, minimizing the nearest side lobe, widely used for spectrum analysis.
     Hamming,
-    /// Hann
+    /// Hann window: A window function that represents a single cosine taper, minimizing the width of the main lobe.
     Hann,
-    /// Nutall
+    /// Nuttall window: A window function with very low side lobes, good for applications requiring high dynamic range.
     Nuttall,
-    /// Blackman-Nutall
-    BlackmanNutall,
-    /// Flat top of Matlab, https://www.mathworks.com/help/signal/ref/flattopwin.html
+    /// Blackman-Nuttall window: A window function combining Blackman and Nuttall, providing low side lobes.
+    BlackmanNuttall,
+    /// Flat top window: A window designed for accurate amplitude measurements with very low ripple in the passband. [More Info](https://www.mathworks.com/help/signal/ref/flattopwin.html)
     FlatTop,
+    /// Bartlett window: A triangular window that is zero at each end, tapering linearly to a peak in the middle.
     Bartlett,
+    /// Triangular window: Similar to the Bartlett window but not necessarily zero at the edges, useful for simple applications.
     Triangular,
-    // Rectangular
-    // there are many more, what makes sense to include?
+    /// Rectangular window: A simple window function with no tapering, equivalent to not windowing at all.
+    Rectangular,
 }
 
 enum WindowFamily {
     Cosine,
     Triangular,
+    Rectangular,
 }
 
-/// Specify the symmetry of a window function.
+/// Enum to specify the symmetry of a window function, which determines its application in signal processing.
 #[derive(Debug, Clone, Copy)]
-pub enum WindowType {
-    /// Generate a periodic window, often used in spectral analysis.
+pub enum Symmetry {
+    /// Generate a periodic window:
+    /// This window is designed to repeat itself, making it ideal for spectral analysis where the window must seamlessly align with the periodic signal.
     Periodic,
-    /// Generate a symmetric window, often used in filter design.
+    /// Generate a symmetric window:
+    /// This window is symmetric around its center, making it suitable for filter design where a zero-phase response is desired.
     Symmetric,
 }
 
+/// A generic struct for generating various windows.
 pub struct GenericWindowIter<T> {
     length: usize,
     index: usize,
@@ -46,16 +54,12 @@ pub struct GenericWindowIter<T> {
     a2: T,
     a3: T,
     a4: T,
-    pi2: T,
-    pi4: T,
-    pi6: T,
-    pi8: T,
     family: WindowFamily,
 }
 
 impl<T> Iterator for GenericWindowIter<T>
 where
-    T: Float,
+    T: Float + FloatConst,
 {
     type Item = T;
 
@@ -78,7 +82,7 @@ where
 
 impl<T> ExactSizeIterator for GenericWindowIter<T>
 where
-    T: Float,
+    T: Float + FloatConst,
 {
     #[inline]
     fn len(&self) -> usize {
@@ -88,20 +92,12 @@ where
 
 impl<T> GenericWindowIter<T>
 where
-    T: Float,
+    T: Float + FloatConst,
 {
-    pub fn new_cosine(
-        length: usize,
-        window_type: WindowType,
-        a0: T,
-        a1: T,
-        a2: T,
-        a3: T,
-        a4: T,
-    ) -> Self {
-        let len_float = match window_type {
-            WindowType::Periodic => T::from(length).unwrap(),
-            WindowType::Symmetric => T::from(length - 1).unwrap(),
+    fn new_cosine(length: usize, symmetry: Symmetry, a0: T, a1: T, a2: T, a3: T, a4: T) -> Self {
+        let len_float = match symmetry {
+            Symmetry::Periodic => T::from(length).unwrap(),
+            Symmetry::Symmetric => T::from(length - 1).unwrap(),
         };
         GenericWindowIter {
             a0,
@@ -112,18 +108,14 @@ where
             index: 0,
             length,
             len_float,
-            pi2: T::from(core::f64::consts::PI).unwrap() * T::from(2.0).unwrap(),
-            pi4: T::from(core::f64::consts::PI).unwrap() * T::from(4.0).unwrap(),
-            pi6: T::from(core::f64::consts::PI).unwrap() * T::from(6.0).unwrap(),
-            pi8: T::from(core::f64::consts::PI).unwrap() * T::from(8.0).unwrap(),
             family: WindowFamily::Cosine,
         }
     }
 
-    fn new_triangular(length: usize, window_type: WindowType, len_offset: usize) -> Self {
-        let len_adjusted = match window_type {
-            WindowType::Periodic => length,
-            WindowType::Symmetric => length - 1,
+    fn new_triangular(length: usize, symmetry: Symmetry, len_offset: usize) -> Self {
+        let len_adjusted = match symmetry {
+            Symmetry::Periodic => length,
+            Symmetry::Symmetric => length - 1,
         };
         let len_float = T::from(len_adjusted).unwrap();
         let a0 = len_float / T::from(2).unwrap();
@@ -141,11 +133,21 @@ where
             index: 0,
             length,
             len_float,
-            pi2: T::zero(),
-            pi4: T::zero(),
-            pi6: T::zero(),
-            pi8: T::zero(),
             family: WindowFamily::Triangular,
+        }
+    }
+
+    fn new_rectangular(length: usize) -> Self {
+        GenericWindowIter {
+            a0: T::zero(),
+            a1: T::zero(),
+            a2: T::zero(),
+            a3: T::zero(),
+            a4: T::zero(),
+            index: 0,
+            length,
+            len_float: T::zero(),
+            family: WindowFamily::Rectangular,
         }
     }
 
@@ -153,29 +155,59 @@ where
         let x_float = T::from(self.index).unwrap();
         match self.family {
             WindowFamily::Cosine => {
-                self.a0 - self.a1 * (self.pi2 * x_float / self.len_float).cos()
-                    + self.a2 * (self.pi4 * x_float / self.len_float).cos()
-                    - self.a3 * (self.pi6 * x_float / self.len_float).cos()
-                    + self.a4 * (self.pi8 * x_float / self.len_float).cos()
+                self.a0
+                    - self.a1 * (T::from(2.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    + self.a2 * (T::from(4.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    - self.a3 * (T::from(6.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    + self.a4 * (T::from(8.0).unwrap() * T::PI() * x_float / self.len_float).cos()
             }
             WindowFamily::Triangular => T::one() - ((x_float - self.a0) / self.a1).abs(),
+            WindowFamily::Rectangular => T::one(),
         }
     }
 }
 
-/// Make the selected window function.
+/// Generate an iterator for the values of the selected window function.
+///
+/// This function creates an iterator that yields the values of the specified window function
+/// over the given length, with the chosen symmetry. It supports various window functions
+/// commonly used in signal processing to mitigate spectral leakage.
+///
+/// # Parameters
+/// - `length`: The length of the window.
+/// - `windowfunc`: The type of window function to generate. See `WindowFunction` enum for options.
+/// - `symmetry`: The symmetry of the window function. See `Symmetry` enum for options.
+///
+/// # Returns
+/// An iterator (`GenericWindowIter<T>`) that yields the values of the window function.
+///
+/// # Type Parameters
+/// - `T`: A numeric type that implements the `Float` and `FloatConst` traits.
+///
+/// # Examples
+/// ```
+/// use windowfunctions::{window, WindowFunction, Symmetry};
+/// let iter = window::<f32>(1024, WindowFunction::Hamming, Symmetry::Symmetric);
+/// for value in iter {
+///     println!("{}", value);
+/// }
+/// ```
+///
+/// # Note
+/// Each window function may have different characteristics and uses, so choose the one
+/// that best suits your application needs.
 pub fn window<T>(
     length: usize,
     windowfunc: WindowFunction,
-    window_type: WindowType,
+    symmetry: Symmetry,
 ) -> GenericWindowIter<T>
 where
-    T: Float,
+    T: Float + FloatConst,
 {
     match windowfunc {
         WindowFunction::BlackmanHarris => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.35875).unwrap(),
             T::from(0.48829).unwrap(),
             T::from(0.14128).unwrap(),
@@ -184,7 +216,7 @@ where
         ),
         WindowFunction::Blackman => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.42).unwrap(),
             T::from(0.5).unwrap(),
             T::from(0.08).unwrap(),
@@ -193,7 +225,7 @@ where
         ),
         WindowFunction::Hamming => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.53836).unwrap(),
             T::from(0.46164).unwrap(),
             T::zero(),
@@ -202,7 +234,7 @@ where
         ),
         WindowFunction::Hann => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.5).unwrap(),
             T::from(0.5).unwrap(),
             T::zero(),
@@ -211,16 +243,16 @@ where
         ),
         WindowFunction::Nuttall => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.3635819).unwrap(),
             T::from(0.4891775).unwrap(),
             T::from(0.1365995).unwrap(),
             T::from(0.0106411).unwrap(),
             T::zero(),
         ),
-        WindowFunction::BlackmanNutall => GenericWindowIter::new_cosine(
+        WindowFunction::BlackmanNuttall => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.3635819).unwrap(),
             T::from(0.4891775).unwrap(),
             T::from(0.1365995).unwrap(),
@@ -229,15 +261,16 @@ where
         ),
         WindowFunction::FlatTop => GenericWindowIter::new_cosine(
             length,
-            window_type,
+            symmetry,
             T::from(0.21557895).unwrap(),
             T::from(0.41663158).unwrap(),
             T::from(0.277263158).unwrap(),
             T::from(0.083578947).unwrap(),
             T::from(0.006947368).unwrap(),
         ),
-        WindowFunction::Bartlett => GenericWindowIter::new_triangular(length, window_type, 0),
-        WindowFunction::Triangular => GenericWindowIter::new_triangular(length, window_type, 1),
+        WindowFunction::Bartlett => GenericWindowIter::new_triangular(length, symmetry, 0),
+        WindowFunction::Triangular => GenericWindowIter::new_triangular(length, symmetry, 1),
+        WindowFunction::Rectangular => GenericWindowIter::new_rectangular(length),
     }
 }
 
@@ -245,9 +278,10 @@ where
 mod tests {
     extern crate approx;
     use crate::window;
+    use crate::Symmetry;
     use crate::WindowFunction;
-    use crate::WindowType;
     use num_traits::Float;
+    use num_traits::FloatConst;
     use std::fmt::Debug;
 
     #[test]
@@ -567,11 +601,19 @@ mod tests {
         check_window(WindowFunction::Triangular, &expected);
     }
 
-    fn check_window<T: Float + Debug>(wfunc: WindowFunction, sym_expected: &[T]) {
+    #[test]
+    fn test_rectangular() {
+        let expected = vec![
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        ];
+        check_window(WindowFunction::Rectangular, &expected);
+    }
+
+    fn check_window<T: Float + FloatConst + Debug>(wfunc: WindowFunction, sym_expected: &[T]) {
         let sym_len = sym_expected.len();
         let per_len = sym_len - 1;
-        let iter_per = window::<T>(per_len, wfunc, WindowType::Periodic);
-        let iter_sym = window::<T>(sym_len, wfunc, WindowType::Symmetric);
+        let iter_per = window::<T>(per_len, wfunc, Symmetry::Periodic);
+        let iter_sym = window::<T>(sym_len, wfunc, Symmetry::Symmetric);
         for (idx, (actual, expected)) in iter_per.into_iter().zip(sym_expected).enumerate() {
             assert!(
                 (actual - *expected).abs() < T::from(0.000001).unwrap(),
