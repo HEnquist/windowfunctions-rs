@@ -46,14 +46,24 @@ pub enum Symmetry {
 
 /// A generic struct for generating various windows.
 pub struct GenericWindowIter<T> {
+    /// Length of the window to generate.
     length: usize,
+    /// Current iteration index.
     index: usize,
+    /// Window length as a float.
+    /// Generally equal to length for a periodic window, or length-1 for a symmetric.
     len_float: T,
-    a0: T,
-    a1: T,
-    a2: T,
-    a3: T,
-    a4: T,
+    /// Constant, meaning varies depending on window family.
+    const_a: T,
+    /// Constant, meaning varies depending on window family.
+    const_b: T,
+    /// Constant, meaning varies depending on window family.
+    const_c: T,
+    /// Constant, meaning varies depending on window family.
+    const_d: T,
+    /// Constant, meaning varies depending on window family.
+    const_e: T,
+    /// Window family, used to pick which function to call to calculate values.
     family: WindowFamily,
 }
 
@@ -94,17 +104,25 @@ impl<T> GenericWindowIter<T>
 where
     T: Float + FloatConst,
 {
-    fn new_cosine(length: usize, symmetry: Symmetry, a0: T, a1: T, a2: T, a3: T, a4: T) -> Self {
+    fn new_cosine(
+        length: usize,
+        symmetry: Symmetry,
+        const_a: T,
+        const_b: T,
+        const_c: T,
+        const_d: T,
+        const_e: T,
+    ) -> Self {
         let len_float = match symmetry {
             Symmetry::Periodic => T::from(length).unwrap(),
             Symmetry::Symmetric => T::from(length - 1).unwrap(),
         };
         GenericWindowIter {
-            a0,
-            a1,
-            a2,
-            a3,
-            a4,
+            const_a,
+            const_b,
+            const_c,
+            const_d,
+            const_e,
             index: 0,
             length,
             len_float,
@@ -118,18 +136,18 @@ where
             Symmetry::Symmetric => length - 1,
         };
         let len_float = T::from(len_adjusted).unwrap();
-        let a0 = len_float / T::from(2).unwrap();
-        let a1 = if len_offset > 0 {
+        let const_a = len_float / T::from(2).unwrap();
+        let const_b = if len_offset > 0 {
             (len_float + T::from(len_offset + 1 - len_adjusted % 2).unwrap()) / T::from(2).unwrap()
         } else {
-            a0
+            const_a
         };
         GenericWindowIter {
-            a0,
-            a1,
-            a2: T::zero(),
-            a3: T::zero(),
-            a4: T::zero(),
+            const_a,
+            const_b,
+            const_c: T::zero(),
+            const_d: T::zero(),
+            const_e: T::zero(),
             index: 0,
             length,
             len_float,
@@ -139,11 +157,11 @@ where
 
     fn new_rectangular(length: usize) -> Self {
         GenericWindowIter {
-            a0: T::zero(),
-            a1: T::zero(),
-            a2: T::zero(),
-            a3: T::zero(),
-            a4: T::zero(),
+            const_a: T::zero(),
+            const_b: T::zero(),
+            const_c: T::zero(),
+            const_d: T::zero(),
+            const_e: T::zero(),
             index: 0,
             length,
             len_float: T::zero(),
@@ -155,13 +173,17 @@ where
         let x_float = T::from(self.index).unwrap();
         match self.family {
             WindowFamily::Cosine => {
-                self.a0
-                    - self.a1 * (T::from(2.0).unwrap() * T::PI() * x_float / self.len_float).cos()
-                    + self.a2 * (T::from(4.0).unwrap() * T::PI() * x_float / self.len_float).cos()
-                    - self.a3 * (T::from(6.0).unwrap() * T::PI() * x_float / self.len_float).cos()
-                    + self.a4 * (T::from(8.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                self.const_a
+                    - self.const_b
+                        * (T::from(2.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    + self.const_c
+                        * (T::from(4.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    - self.const_d
+                        * (T::from(6.0).unwrap() * T::PI() * x_float / self.len_float).cos()
+                    + self.const_e
+                        * (T::from(8.0).unwrap() * T::PI() * x_float / self.len_float).cos()
             }
-            WindowFamily::Triangular => T::one() - ((x_float - self.a0) / self.a1).abs(),
+            WindowFamily::Triangular => T::one() - ((x_float - self.const_a) / self.const_b).abs(),
             WindowFamily::Rectangular => T::one(),
         }
     }
@@ -286,6 +308,7 @@ mod tests {
 
     #[test]
     fn test_hann_odd() {
+        // reference: scipy.signal.windows.hann(13, sym=True)
         let expected = vec![
             0.0, 0.0669873, 0.25, 0.5, 0.75, 0.9330127, 1.0, 0.9330127, 0.75, 0.5, 0.25, 0.0669873,
             0.0,
@@ -295,6 +318,7 @@ mod tests {
 
     #[test]
     fn test_hann_even() {
+        // reference: scipy.signal.windows.hann(14, sym=True)
         let expected_even = vec![
             0.0,
             0.0572719871733951,
@@ -316,6 +340,7 @@ mod tests {
 
     #[test]
     fn test_hamming_odd() {
+        // reference: scipy.signal.windows.general_hamming(13, 0.53836, sym=True):
         let expected = vec![
             0.0767199999999999,
             0.1385680325969516,
@@ -336,6 +361,7 @@ mod tests {
 
     #[test]
     fn test_hamming_even() {
+        // reference: scipy.signal.windows.general_hamming(14, 0.53836, sym=True):
         let expected = vec![
             0.0767199999999999,
             0.12959808031745212,
@@ -357,6 +383,7 @@ mod tests {
 
     #[test]
     fn test_blackman_odd() {
+        // reference: scipy.signal.windows.blackman(13, sym=True)
         let expected = vec![
             -1.3877787807814457e-17,
             0.02698729810778064,
@@ -377,6 +404,7 @@ mod tests {
 
     #[test]
     fn test_blackman_even() {
+        // reference: scipy.signal.windows.blackman(14, sym=True)
         let expected = vec![
             -1.3877787807814457e-17,
             0.022717166911887535,
@@ -398,6 +426,7 @@ mod tests {
 
     #[test]
     fn test_blackman_harris_odd() {
+        // reference: scipy.signal.windows.blackmanharris(13, sym=True)
         let expected = vec![
             6.0000000000001025e-05,
             0.006518455586096459,
@@ -418,6 +447,7 @@ mod tests {
 
     #[test]
     fn test_blackman_harris_even() {
+        // reference: scipy.signal.windows.blackmanharris(14, sym=True)
         let expected = vec![
             6.0000000000001025e-05,
             0.005238996226589691,
@@ -439,6 +469,7 @@ mod tests {
 
     #[test]
     fn test_nuttall_odd() {
+        // reference: scipy.signal.windows.nuttall(13, sym=True)
         let expected = vec![
             0.0003628000000000381,
             0.008241508040237797,
@@ -459,6 +490,7 @@ mod tests {
 
     #[test]
     fn test_nuttall_even() {
+        // reference: scipy.signal.windows.nuttall(14, sym=True)
         let expected = vec![
             0.0003628000000000381,
             0.006751452513864563,
@@ -480,6 +512,7 @@ mod tests {
 
     #[test]
     fn test_flat_top_odd() {
+        // reference: scipy.signal.windows.flattop(13, sym=True)
         let expected = vec![
             -0.0004210510000000013,
             -0.01007668729884861,
@@ -500,6 +533,7 @@ mod tests {
 
     #[test]
     fn test_flat_top_even() {
+        // reference: scipy.signal.windows.flattop(14, sym=True)
         let expected = vec![
             -0.0004210510000000013,
             -0.00836446681676538,
@@ -521,6 +555,7 @@ mod tests {
 
     #[test]
     fn test_bartlett_odd() {
+        // reference: scipy.signal.windows.bartlett(14, sym=True)
         let expected = vec![
             0.0,
             0.16666666666666666,
@@ -541,6 +576,7 @@ mod tests {
 
     #[test]
     fn test_bartlett_even() {
+        // reference: scipy.signal.windows.bartlett(14, sym=True)
         let expected = vec![
             0.0,
             0.15384615384615385,
@@ -562,6 +598,7 @@ mod tests {
 
     #[test]
     fn test_triangular_odd() {
+        // reference: scipy.signal.windows.triang(13, sym=True)
         let expected = vec![
             0.14285714285714285,
             0.2857142857142857,
@@ -582,6 +619,7 @@ mod tests {
 
     #[test]
     fn test_triangular_even() {
+        // reference: scipy.signal.windows.triang(14, sym=True)
         let expected = vec![
             0.07142857142857142,
             0.21428571428571427,
