@@ -229,7 +229,7 @@ where
     }
 }
 
-// simple implementation of the modified Bessel function of order 0
+/// Simple implementation of the modified Bessel function of order 0
 fn bessel_i0<T: Float>(x: T) -> T {
     let base = x * x / T::from(4).unwrap();
     let mut term = T::one();
