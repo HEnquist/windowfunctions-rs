@@ -2,35 +2,51 @@
 
 use num_traits::{Float, FloatConst};
 
-/// Enumeration of different window functions used to mitigate spectral leakage in signal processing.
+/// Enumeration of the available window functions.
 #[derive(Debug, Clone, Copy)]
 pub enum WindowFunction {
-    /// Blackman window: A taper formed by using the first three terms of a summation of cosines. Good for low sidelobe level.
+    /// Blackman window: A taper formed by using the first three terms
+    /// of a summation of cosines. Good for low sidelobe level.
     Blackman,
-    /// Blackman-Harris window: A generalization of the Blackman window, offering improved spectral leakage performance.
+    /// Blackman-Harris window: A generalization of the Blackman window,
+    /// offering improved spectral leakage performance.
     BlackmanHarris,
-    /// Hamming window: A raised cosine window, minimizing the nearest side lobe, widely used for spectrum analysis.
+    /// Hamming window: A raised cosine window,
+    /// minimizing the nearest side lobe, widely used for spectrum analysis.
     Hamming,
-    /// Hann window: A window function that represents a single cosine taper, minimizing the width of the main lobe.
+    /// Hann window: A window function that represents a single cosine taper,
+    /// minimizing the width of the main lobe.
     Hann,
-    /// Nuttall window: A window function with very low side lobes, good for applications requiring high dynamic range.
+    /// Nuttall window: A window function with very low side lobes,
+    /// good for applications requiring high dynamic range.
     Nuttall,
-    /// Blackman-Nuttall window: A window function combining Blackman and Nuttall, providing low side lobes.
+    /// Blackman-Nuttall window: A window function combining Blackman and Nuttall,
+    /// providing low side lobes.
     BlackmanNuttall,
-    /// Flat top window: A window designed for accurate amplitude measurements with very low ripple in the passband. [More Info](https://www.mathworks.com/help/signal/ref/flattopwin.html)
+    /// Flat top window: A window designed for accurate amplitude measurements
+    /// with very low ripple in the passband.
+    /// [More Info](https://www.mathworks.com/help/signal/ref/flattopwin.html)
     FlatTop,
-    /// Bartlett window: A triangular window that is zero at each end, tapering linearly to a peak in the middle.
+    /// Bartlett window: A triangular window that is zero at each end,
+    /// tapering linearly to a peak in the middle.
     Bartlett,
-    /// Triangular window: Similar to the Bartlett window but not necessarily zero at the edges, useful for simple applications.
+    /// Triangular window: Similar to the Bartlett window but not necessarily zero at the edges,
+    /// useful for simple applications.
     Triangular,
-    /// Rectangular window: A simple window function with no tapering, equivalent to not windowing at all.
+    /// Rectangular window: A simple window function with no tapering,
+    /// equivalent to not windowing at all.
     Rectangular,
+    /// Kaiser window: A parameterized window function that provides a trade-off
+    /// between main lobe width and side lobe level.
+    /// The `beta` parameter controls the shape of the window.
+    Kaiser { beta: f32 },
 }
 
 enum WindowFamily {
     Cosine,
     Triangular,
     Rectangular,
+    Kaiser,
 }
 
 /// Enum to specify the symmetry of a window function, which determines its application in signal processing.
@@ -169,6 +185,25 @@ where
         }
     }
 
+    fn new_kaiser(length: usize, beta: f32, symmetry: Symmetry) -> Self {
+        let len_adjusted = match symmetry {
+            Symmetry::Periodic => length,
+            Symmetry::Symmetric => length - 1,
+        };
+        let len_float = T::from(len_adjusted).unwrap();
+        let const_b = len_float / T::from(2).unwrap();
+        GenericWindowIter {
+            const_a: T::from(beta).unwrap(),
+            const_b,
+            const_c: T::zero(),
+            const_d: T::zero(),
+            const_e: T::zero(),
+            index: 0,
+            length,
+            len_float: T::zero(),
+            family: WindowFamily::Kaiser,
+        }
+    }
     fn calc_at_index(&self) -> T {
         let x_float = T::from(self.index).unwrap();
         match self.family {
@@ -185,8 +220,29 @@ where
             }
             WindowFamily::Triangular => T::one() - ((x_float - self.const_a) / self.const_b).abs(),
             WindowFamily::Rectangular => T::one(),
+            WindowFamily::Kaiser => {
+                bessel_i0(
+                    self.const_a * T::sqrt(T::one() - (x_float / self.const_b - T::one()).powi(2)),
+                ) / bessel_i0(self.const_a)
+            }
         }
     }
+}
+
+// simple implementation of the modified Bessel function of order 0
+fn bessel_i0<T: Float>(x: T) -> T {
+    let base = x * x / T::from(4).unwrap();
+    let mut term = T::one();
+    let mut result = T::one();
+    for idx in 1..1000 {
+        term = term * base / T::from(idx * idx).unwrap();
+        let previous = result;
+        result = result + term;
+        if result == previous {
+            break;
+        }
+    }
+    result
 }
 
 /// Generate an iterator for the values of the selected window function.
@@ -293,12 +349,14 @@ where
         WindowFunction::Bartlett => GenericWindowIter::new_triangular(length, symmetry, 0),
         WindowFunction::Triangular => GenericWindowIter::new_triangular(length, symmetry, 1),
         WindowFunction::Rectangular => GenericWindowIter::new_rectangular(length),
+        WindowFunction::Kaiser { beta } => GenericWindowIter::new_kaiser(length, beta, symmetry),
     }
 }
 
 #[cfg(test)]
 mod tests {
     extern crate approx;
+    use crate::bessel_i0;
     use crate::window;
     use crate::Symmetry;
     use crate::WindowFunction;
@@ -645,6 +703,103 @@ mod tests {
             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
         ];
         check_window(WindowFunction::Rectangular, &expected);
+    }
+
+    #[test]
+    fn test_kaiser_odd() {
+        // reference: scipy.signal.windows.kaiser(13, 4.0, sym=True)
+        let expected = vec![
+            0.08848052607644988,
+            0.23451458444645476,
+            0.42541136047056394,
+            0.6334317797559347,
+            0.8216091340006108,
+            0.9528950441054435,
+            1.0,
+            0.9528950441054435,
+            0.8216091340006108,
+            0.6334317797559347,
+            0.42541136047056394,
+            0.23451458444645476,
+            0.08848052607644988,
+        ];
+        check_window(WindowFunction::Kaiser { beta: 4.0 }, &expected);
+    }
+
+    #[test]
+    fn test_kaiser_even() {
+        // reference: scipy.signal.windows.kaiser(14, 4.0, sym=True)
+        let expected = vec![
+            0.08848052607644988,
+            0.22142542587610076,
+            0.39408799858012694,
+            0.5857681621222717,
+            0.7681541362093118,
+            0.9111914713309941,
+            0.9898205072696717,
+            0.9898205072696717,
+            0.9111914713309941,
+            0.7681541362093118,
+            0.5857681621222717,
+            0.39408799858012694,
+            0.22142542587610076,
+            0.08848052607644988,
+        ];
+        check_window(WindowFunction::Kaiser { beta: 4.0 }, &expected);
+    }
+
+    #[test]
+    fn test_bessel_i0_f64() {
+        // reference: scipy.special.i0()
+        assert_approx_f64(bessel_i0(0.0), 1.0);
+        assert_approx_f64(bessel_i0(1.0), 1.2660658777520082);
+        assert_approx_f64(bessel_i0(2.0), 2.279585302336067);
+        assert_approx_f64(bessel_i0(3.0), 4.880792585865024);
+        assert_approx_f64(bessel_i0(5.0), 27.239871823604442);
+        assert_approx_f64(bessel_i0(10.0), 2815.716628466254);
+        assert_approx_f64(bessel_i0(30.0), 781672297823.9775);
+        assert_approx_f64(bessel_i0(-1.0), 1.2660658777520082);
+        assert_approx_f64(bessel_i0(-2.0), 2.279585302336067);
+        assert_approx_f64(bessel_i0(-3.0), 4.880792585865024);
+        assert_approx_f64(bessel_i0(-5.0), 27.239871823604442);
+        assert_approx_f64(bessel_i0(-10.0), 2815.716628466254);
+        assert_approx_f64(bessel_i0(-30.0), 781672297823.9775);
+    }
+
+    fn assert_approx_f64(actual: f64, expected: f64) {
+        assert!(
+            (actual / expected - 1.0).abs() < 0.000001,
+            "Expected {}, got {}",
+            expected,
+            actual
+        );
+    }
+
+    #[test]
+    fn test_bessel_i0_f32() {
+        // reference: scipy.special.i0()
+        assert_approx_f32(bessel_i0(0.0), 1.0);
+        assert_approx_f32(bessel_i0(1.0), 1.2660658777520082);
+        assert_approx_f32(bessel_i0(2.0), 2.279585302336067);
+        assert_approx_f32(bessel_i0(3.0), 4.880792585865024);
+        assert_approx_f32(bessel_i0(5.0), 27.239871823604442);
+        assert_approx_f32(bessel_i0(10.0), 2815.716628466254);
+        assert_approx_f32(bessel_i0(30.0), 781672297823.9775);
+        assert_approx_f32(bessel_i0(-1.0), 1.2660658777520082);
+        assert_approx_f32(bessel_i0(-2.0), 2.279585302336067);
+        assert_approx_f32(bessel_i0(-3.0), 4.880792585865024);
+        assert_approx_f32(bessel_i0(-5.0), 27.239871823604442);
+        assert_approx_f32(bessel_i0(-10.0), 2815.716628466254);
+        assert_approx_f32(bessel_i0(-30.0), 781672297823.9775);
+    }
+
+    fn assert_approx_f32(actual: f32, expected: f32) {
+        assert!(
+            (actual / expected - 1.0).abs() < 0.00001,
+            "Expected {}, got {}",
+            expected,
+            actual
+        );
     }
 
     fn check_window<T: Float + FloatConst + Debug>(wfunc: WindowFunction, sym_expected: &[T]) {
