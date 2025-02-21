@@ -355,7 +355,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    extern crate approx;
     use crate::bessel_i0;
     use crate::window;
     use crate::Symmetry;
