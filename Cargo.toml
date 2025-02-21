@@ -7,7 +7,7 @@ authors = ["HEnquist <henrik.enquist@gmail.com>"]
 description = "Common window functions for apodization"
 license = "MIT"
 repository = "https://github.com/HEnquist/finestra"
-keywords = ["apodization", "windowing"]
+keywords = ["math", "dsp", "apodization", "windowing", "fft", "spectrum"]
 categories = ["mathematics", "science"]
 readme = "README.md"
 
